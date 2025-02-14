@@ -48,6 +48,7 @@ The hyper parameter tunning results of our experiments about all the DLKT models
 15. https://github.com/shshen-closer/DIMKT
 16. https://github.com/skewondr/FoLiBi
 17. https://github.com/yxonic/DTransformer
+18. https://github.com/lilstrawberry/ReKT
 
 ### Papers
 
@@ -61,7 +62,7 @@ The hyper parameter tunning results of our experiments about all the DLKT models
 8. SAKT: A self-attentive model for knowledge tracing 
 9. SAINT: Towards an appropriate query, key, and value computation for knowledge tracing 
 10. AKT: Context-aware attentive knowledge tracing 
-11. Temporal Cross-Effects in Knowledge Tracing
+11. HawkesKT: Temporal Cross-Effects in Knowledge Tracing
 12. IEKT: Tracing Knowledge State with Individual Cognition and Acquisition Estimation
 13. SKVMN: Knowledge Tracing with Sequential Key-Value Memory Networks
 14. LPKT: Learning Process-consistent Knowledge Tracing
@@ -73,7 +74,9 @@ The hyper parameter tunning results of our experiments about all the DLKT models
 20. SparseKT: Towards Robust Knowledge Tracing Models via K-sparse Attention
 21. FoLiBiKT: Forgetting-aware Linear Bias for Attentive Knowledge Tracing
 22. DTransformer: Tracing Knowledge Instead of Patterns: Stable Knowledge Tracing with Diagnostic Transformer
-
+23. stableKT: Enhancing Length Generalization for Attention Based Knowledge Tracing Models with Linear Biases
+24. extraKT: Extending Context Window of Attention Based Knowledge Tracing Models via Length Extrapolation
+25. ReKT: Revisiting Knowledge Tracing: A Simple and Powerful Model
 
 
 ## Citation

@@ -58,6 +58,12 @@ graph based models and attention based models in our work, we mainly develop the
 +------------+----------------+
 |Dtransformer| Attention      |
 +------------+----------------+
+| stableKT   | Attention      |
++------------+----------------+
+| extraKT    | Attention      |
++------------+----------------+
+| reKT    | Sequential      |
++------------+----------------+
 
 DKT
 ---
@@ -397,3 +403,42 @@ Moreover, a contrastive learning-based training algorithm enhances the stability
 `Yin, Yu, et al. "Tracing Knowledge Instead of Patterns: Stable Knowledge Tracing with Diagnostic Transformer." 
 Proceedings of the ACM Web Conference.
 2023. <https://dl.acm.org/doi/pdf/10.1145/3543507.3583255>`__
+
+stableKT
+----
+
+StableKT is able to learn from short sequences, maintain stable and consistent performance when generalizing on long 
+sequences, and capture hierarchical relationships between questions and their associated KCs.
+
+.. figure:: ../pics/stablekt.png
+   :alt: 
+
+`Li X, Bai Y, Guo T, et al. "Enhancing Length Generalization for Attention Based Knowledge Tracing Models with Linear Biases." 
+Proceedings of the Thirty-Third International Joint Conference on Artificial Intelligence.
+2024. <https://www.ijcai.org/proceedings/2024/654>`__
+
+
+extraKT
+----
+
+ExtraKT represents student interactions using a question encoder and a response encoder, and utilizes an efficient position 
+embedding method to facilitate better extrapolation.
+
+.. figure:: ../pics/extrakt.png
+   :alt: 
+
+`Li X, Bai Y, Guo T, et al. "Extending Context Window of Attention Based Knowledge Tracing Models via Length Extrapolation." 
+Proceedings of the 26th European Conference on Artificial Intelligence.
+2024. <https://ebooks.iospress.nl/pdf/doi/10.3233/FAIA240651>`__
+
+reKT
+----
+
+ReKT models student knowledge states from questions, concepts, and domains, leveraging a lightweight Forget-Response-Update (FRU)
+ framework inspired by human cognition to achieve superior KT performance with minimal computational resources.
+
+.. figure:: ../pics/rekt.png
+   :alt: 
+
+`Shen, Xiaoxuan, et al. "Revisiting Knowledge Tracing: A Simple and Powerful Model." Proceedings of the 32nd ACM International Conference on Multimedia. 2024.
+<https://dl.acm.org/doi/pdf/10.1145/3664647.3681205>`__
