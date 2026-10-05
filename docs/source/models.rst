@@ -64,6 +64,16 @@ graph based models and attention based models in our work, we mainly develop the
 +------------+----------------+
 | reKT    | Sequential      |
 +------------+----------------+
+| csKT    | Attention      |
++------------+----------------+
+| LefoKT    | Attention      |
++------------+----------------+
+| UKT    | Attention      |
++------------+----------------+
+| MoC-KT | Attention      |
++------------+----------------+
+| FA-KT  | Attention      |
++------------+----------------+
 
 DKT
 ---
@@ -434,11 +444,136 @@ Proceedings of the 26th European Conference on Artificial Intelligence.
 reKT
 ----
 
-ReKT models student knowledge states from questions, concepts, and domains, leveraging a lightweight Forget-Response-Update (FRU)
- framework inspired by human cognition to achieve superior KT performance with minimal computational resources.
+ReKT models student knowledge states from questions, concepts, and domains, leveraging a lightweight Forget-Response-Update (FRU) framework inspired by human cognition to achieve superior KT performance with minimal computational resources.
 
 .. figure:: ../pics/rekt.png
    :alt: 
 
 `Shen, Xiaoxuan, et al. "Revisiting Knowledge Tracing: A Simple and Powerful Model." Proceedings of the 32nd ACM International Conference on Multimedia. 2024.
 <https://dl.acm.org/doi/pdf/10.1145/3664647.3681205>`__
+
+csKT
+----
+csKT is specifically designed to address the cold-start problem in knowledge tracing by introducing kernel bias and cone attention mechanisms to handle short student interaction sequences while maintaining prediction stability for longer sequences.
+
+.. figure:: ../pics/cskt.png
+   :alt: 
+
+`Bai, Youheng, et al. "csKT: Addressing cold-start problem in knowledge tracing via kernel bias and cone attention." Expert Systems with Applications. 2025.
+<https://www.sciencedirect.com/science/article/pii/S0957417424028550>`__
+
+FlucKT
+----
+FlucKT enhances knowledge tracing by explicitly modeling both long-term cognitive trends and short-term cognitive fluctuations through a decomposition-based attention mechanism with causal convolution and a kernelized bias attention score penalty.
+
+.. figure:: ../pics/fluckt.png   
+   :alt: 
+   
+`Hou, Mingliang, et al. "Cognitive Fluctuations Enhanced Attention Network for Knowledge Tracing." Proceedings of the 39th Annual AAAI Conference on Artificial Intelligence. 2025.
+<https://ojs.aaai.org/index.php/AAAI/article/view/33562>`__
+
+lefoKT
+----
+LefoKT decouples forgetting patterns from problem relevance via relative forgetting attention to better model diverse forgetting behaviors in ever-growing interaction sequences.
+
+.. figure:: ../pics/lefokt.png
+   :alt: 
+
+`Bai, Youheng, et al. "Rethinking and Improving Student Learning and Forgetting Processes for Attention Based Knowledge Tracing Models." Proceedings of the 39th Annual AAAI Conference on Artificial Intelligence. 2025.
+<https://ojs.aaai.org/index.php/AAAI/article/view/34998>`__
+
+
+UKT
+----
+UKT represents student knowledge as probability distributions, tracks learning transitions with Wasserstein attention, and uses uncertainty-aware contrastive learning to improve prediction accuracy.
+
+.. figure:: ../pics/ukt.jpg
+   :alt: 
+
+`Cheng, Weihua, et al. "Uncertainty-aware Knowledge Tracing." Proceedings of the 39th Annual AAAI Conference on Artificial Intelligence. 2025.
+<https://ojs.aaai.org/index.php/AAAI/article/view/35007>`__
+
+HCGKT
+----
+HCGKT integrates hierarchical graph filtering attention with contrastive learning and graph convolutions to model educational data relationships and predict student performance more accurately.
+
+.. figure:: ../pics/hcgkt.png
+   :alt: 
+
+`Huang, Z., Liu, Z. (2025, July). HCGKT: Hierarchical Contrastive Graph Knowledge Tracing with Multi-level Feature Learning. In International Conference on Artificial Intelligence in Education (pp. xxx). Cham: Springer Nature Switzerland.
+<https://pykt.org/>`__
+
+MTKT
+----
+MTKT models multi-granularity temporal characteristics in student interaction data via three components: a multi-aspect embedding layer that captures both temporal information and interaction behaviors, a dual attention module with linear decaying bias that applies negative bias to attention scores to model long-term forgetting across varying sequence lengths, and a causal interaction convolution module that captures fine-grained representations in both short-term and long-term interactions.
+
+.. figure:: ../pics/mtkt.jpg
+   :alt: 
+
+`Bai, Y., Li, X., Liu, Z., Huang, Y., Guo, T., Hou, M., & Luo, W. (2025). Learning multi-granularity temporal characteristics for attention based knowledge tracing. Neurocomputing, 131338.
+<https://doi.org/10.1016/j.neucom.2025.131338>`__
+
+RobustKT
+----
+RobustKT decouples cognitive patterns and random factors through smoothing and subtraction, reweights them via gating or fusion, and employs decay-based attention to enhance knowledge tracing under noisy conditions.
+
+.. figure:: ../pics/robustkt.png
+   :alt: 
+
+`Teng, Guo, et al. "Enhancing Knowledge Tracing through Decoupling Cognitive Pattern from Error-Prone Data." WWW '25: Proceedings of the ACM on Web Conference 2025.
+<https://dl.acm.org/doi/10.1145/3696410.3714486>`__
+
+DenoiseKT
+---------
+DenoiseKT mitigates the attention noise problem in attention-based knowledge tracing by augmenting question representations with question-difficulty and a graph neural network over question-concept relations, and by introducing a denoised attention mechanism that reweights attention scores via a question-similarity boost factor to suppress weights assigned to cognitively irrelevant past interactions.
+
+.. figure:: ../pics/denoisekt.png
+   :alt:
+
+`Deng, Jiwei, et al. "Denoised Attention and Question-Augmented Representations for Knowledge Tracing." Proceedings of the 34th International Joint Conference on Artificial Intelligence, pp. 9619-9627. 2025.
+<https://doi.org/10.24963/ijcai.2025/1069>`__
+
+MoC-KT
+------
+MoC-KT disentangles stable progression from short-term fluctuations via multi-scale causal convolutions with adaptive segmentation, and applies kerple-based decay attention to balance local and global dependencies, mitigating cognitive mirage from learner heterogeneity.
+
+.. figure:: ../pics/mockt.png
+   :alt:
+
+`Mingliang, Hou, et al. "MoC-KT: Mixture of Convolutions for Knowledge Tracing." ACM Transactions on Information Systems. 2026.
+<https://pykt.org/>`__
+
+FA-KT
+-----
+FA-KT decomposes student interaction sequences into diverse frequency components and routes them through a mixture of heterogeneous experts with complementary frequency biases, where a frequency-aware router adaptively combines experts per student to overcome the fixed inductive bias of single-encoder KT models.
+
+.. figure:: ../pics/fa-kt.png
+   :alt:
+
+`Youheng, Bai, et al. "A Frequency-Aware Mixture of Heterogeneous Experts Framework for Knowledge Tracing." Proceedings of the ACM on Web Conference 2026.
+<https://doi.org/10.1145/3774904.3792272>`__
+
+OPERA
+-----
+
+OPERA (Option-level Pedagogical Explanation via Reasoning for Augmented
+Knowledge Tracing) augments KT models with semantic representations derived from
+question text and option-level pedagogical explanations. The explanations are
+generated and checked during offline preprocessing, then encoded as vectors and
+used by KT backbones as enhanced question embeddings. No LLM is called during
+model training or inference.
+
+.. figure:: ../pics/opera.png
+   :alt: OPERA framework
+
+The current pyKT integration provides five OPERA Enhance Pro variants:
+``dkt_enhance_pro``, ``dkvmn_enhance_pro``, ``sakt_enhance_pro``,
+``akt_enhance_pro_qid``, and ``simplekt_enhance_pro_qid``.
+
+
+CGMKT
+-----
+CGMKT instantiates the two fundamental cognitive learning mechanisms (assimilation and differentiation) for knowledge tracing via dual graph fusion and group-level personalized mastery modeling. It fuses stochastic block model-learned KC dependency graphs with question co-occurrence graphs to simulate knowledge assimilation, and maintains student-specific group-level mastery states to gate interaction encoding and model individualized learning differentiation, resolving homogeneous knowledge representation and missing explicit mastery states in existing KT models.
+.. figure:: ../pics/cgmkt.png
+:alt:
+`Author et al. "CGMKT: Cognition-driven Dual-Graph Fusion with Group-level Mastery for Knowledge Tracing." Information Fusion. <https://doi.org/xxx>`__

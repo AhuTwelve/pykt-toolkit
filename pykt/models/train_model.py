@@ -13,10 +13,15 @@ import pandas as pd
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+direct_train_que_type_models = [
+    "dkt_enhance_pro", "dkvmn_enhance_pro", "sakt_enhance_pro",
+    "akt_enhance_pro_qid", "simplekt_enhance_pro_qid", "cgmkt",
+]
+
 def cal_loss(model, ys, r, rshft, sm, preloss=[]):
     model_name = model.model_name
 
-    if model_name in ["atdkt", "simplekt", "stablekt", "bakt_time", "sparsekt"]:
+    if model_name in ["atdkt", "simplekt", "stablekt", "bakt_time", "sparsekt", "cskt", "hcgkt", "fa_kt", "mtkt", "simplekt_enhance_pro_qid"]:
         y = torch.masked_select(ys[0], sm)
         t = torch.masked_select(rshft, sm)
         # print(f"loss1: {y.shape}")
@@ -37,8 +42,17 @@ def cal_loss(model, ys, r, rshft, sm, preloss=[]):
         y = torch.masked_select(ys[0], sm)
         t = torch.masked_select(rshft, sm)
         loss = binary_cross_entropy(y.double(), t.double())
+    
+    elif model_name in ["ukt"]:
+        y = torch.masked_select(ys[0], sm)
+        t = torch.masked_select(rshft, sm)
+        loss1 = binary_cross_entropy(y.double(), t.double())
+        if model.use_CL:
+            loss2 = ys[1]
+            loss1 = loss1 + model.cl_weight * loss2
+        loss =loss1
 
-    elif model_name in ["rkt","dimkt","dkt", "dkt_forget", "dkvmn","deep_irt", "kqn", "sakt", "saint", "atkt", "atktfix", "gkt", "skvmn", "hawkes"]:
+    elif model_name in ["rkt","dimkt","dkt", "dkt_forget", "dkvmn","deep_irt", "kqn", "sakt", "saint", "atkt", "atktfix", "gkt", "skvmn", "hawkes", "dkt_enhance_pro", "sakt_enhance_pro", "dkvmn_enhance_pro", "cgmkt"]:
 
         y = torch.masked_select(ys[0], sm)
         t = torch.masked_select(rshft, sm)
@@ -57,7 +71,7 @@ def cal_loss(model, ys, r, rshft, sm, preloss=[]):
         loss_w2 = loss_w2.mean() / model.num_c
 
         loss = loss + model.lambda_r * loss_r + model.lambda_w1 * loss_w1 + model.lambda_w2 * loss_w2
-    elif model_name in ["akt","extrakt","folibikt", "akt_vector", "akt_norasch", "akt_mono", "akt_attn", "aktattn_pos", "aktmono_pos", "akt_raschx", "akt_raschy", "aktvec_raschx","dtransformer"]:
+    elif model_name in ["mockt", "akt","extrakt","folibikt", "robustkt", "akt_vector", "akt_norasch", "akt_mono", "akt_attn", "aktattn_pos", "aktmono_pos", "akt_raschx", "akt_raschy", "aktvec_raschx","lefokt_akt", "dtransformer", "fluckt", "akt_enhance_pro_qid"]:
         y = torch.masked_select(ys[0], sm)
         t = torch.masked_select(rshft, sm)
         loss = binary_cross_entropy(y.double(), t.double()) + preloss[0]
@@ -74,13 +88,16 @@ def model_forward(model, data, rel=None):
     model_name = model.model_name
     # if model_name in ["dkt_forget", "lpkt"]:
     #     q, c, r, qshft, cshft, rshft, m, sm, d, dshft = data
-    if model_name in ["dkt_forget", "bakt_time"]:
+    if model_name in ["dkt_forget", "bakt_time", "fa_kt", "mtkt"]:
         dcur, dgaps = data
     else:
         dcur = data
     if model_name in ["dimkt"]:
         q, c, r, t,sd,qd = dcur["qseqs"].to(device), dcur["cseqs"].to(device), dcur["rseqs"].to(device), dcur["tseqs"].to(device),dcur["sdseqs"].to(device),dcur["qdseqs"].to(device)
         qshft, cshft, rshft, tshft,sdshft,qdshft = dcur["shft_qseqs"].to(device), dcur["shft_cseqs"].to(device), dcur["shft_rseqs"].to(device), dcur["shft_tseqs"].to(device),dcur["shft_sdseqs"].to(device),dcur["shft_qdseqs"].to(device)
+    elif model_name in ["mockt"]:
+        q, c, r, t, s = dcur["qseqs"].to(device), dcur["cseqs"].to(device), dcur["rseqs"].to(device), dcur["tseqs"].to(device), dcur["ground_seq"].to(device)
+        qshft, cshft, rshft, tshft = dcur["shft_qseqs"].to(device), dcur["shft_cseqs"].to(device), dcur["shft_rseqs"].to(device), dcur["shft_tseqs"].to(device)
     else:
         q, c, r, t = dcur["qseqs"].to(device), dcur["cseqs"].to(device), dcur["rseqs"].to(device), dcur["tseqs"].to(device)
         qshft, cshft, rshft, tshft = dcur["shft_qseqs"].to(device), dcur["shft_cseqs"].to(device), dcur["shft_rseqs"].to(device), dcur["shft_tseqs"].to(device)
@@ -102,12 +119,77 @@ def model_forward(model, data, rel=None):
             y = (y * one_hot(cshft.long(), model.num_c)).sum(-1)
         # y2 = (y2 * one_hot(cshft.long(), model.num_c)).sum(-1)
         ys = [y, y2, y3] # first: yshft
-    elif model_name in ["simplekt", "stablekt", "sparsekt"]:
+    elif model_name in ["simplekt", "stablekt", "sparsekt", "cskt", "simplekt_enhance_pro_qid"]:
         y, y2, y3 = model(dcur, train=True)
         ys = [y[:,1:], y2, y3]
     elif model_name in ["rekt"]:
         y = model(dcur, train=True)
         ys = [y]
+    elif model_name in ["ukt"]:
+        if model.use_CL != 0 :
+            y, sim, y2, y3, temp = model(dcur, train=True)
+            ys = [y[:,1:],sim,y2, y3]
+        else:
+            y, y2, y3 = model(dcur, train=True)
+            ys = [y[:,1:], y2, y3]
+    elif model_name in ["hcgkt"]:
+        
+        step_size = step_size
+        step_m = step_m
+        grad_clip = grad_clip
+        mm = mm
+
+        # the xxx.pt file of pre_load_gcn can be found in :
+        # https://drive.google.com/drive/folders/1JWstsquI3TzbUlqB1EyCbjem4qPyRLCh?usp=drive_link
+        matrix = None
+        if dataset_name == 'assist2009':
+            pre_load_gcn = "../data/assist2009/ques_skill_gcn_adj.pt"
+            matrix = torch.load(pre_load_gcn)
+            if not matrix.is_sparse:
+                matrix = matrix.to_sparse()
+        elif dataset_name == 'algebra2005':
+            pre_load_gcn = "../data/algebra2005/ques_skill_gcn_adj.pt"
+            matrix = torch.load(pre_load_gcn)
+            if not matrix.is_sparse:
+                matrix = matrix.to_sparse()
+        elif dataset_name == 'bridge2algebra2006':
+            pre_load_gcn = "../data/bridge2algebra2006/ques_skill_gcn_adj.pt"
+            matrix = torch.load(pre_load_gcn)
+            if not matrix.is_sparse:
+                matrix = matrix.to_sparse()
+        elif dataset_name == 'peiyou':
+            pre_load_gcn = "../data/peiyou/ques_skill_gcn_adj.pt"
+            matrix = torch.load(pre_load_gcn)
+            if not matrix.is_sparse:
+                matrix = matrix.to_sparse()
+        elif dataset_name == 'nips_task34':
+            pre_load_gcn = "../data/nips_task34/ques_skill_gcn_adj.pt"
+            matrix = torch.load(pre_load_gcn)
+            if not matrix.is_sparse:
+                matrix = matrix.to_sparse()
+        perturb_shape = (matrix.shape[0], emb_size)
+        perturb = torch.FloatTensor(*perturb_shape).uniform_(-step_size, step_size).to(device)
+        perturb.requires_grad_()
+        y, y2, y3, contrast_loss = model(dcur, train=True, perb=perturb)
+        ys = [y[:,1:], y2, y3]
+        loss = cal_loss(model, ys, r, rshft, sm, preloss) + contrast_loss
+        loss /= step_m
+        opt.zero_grad()
+        for _ in range(step_m - 1):
+            loss.backward()
+            perturb_data = perturb.detach() + step_size * torch.sign(perturb.grad.detach())
+            perturb.data = perturb_data.data
+            perturb.grad[:] = 0
+            y, y2, y3, contrast_loss = model(dcur, train=True, perb=perturb)
+            ys = [y[:,1:], y2, y3]
+            loss = cal_loss(model, ys, r, rshft, sm, preloss) + contrast_loss
+            loss /= step_m
+        
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+        opt.step()
+        model.sfm_cl.gcl.update_target_network(mm)  
+        return loss
     elif model_name in ["dtransformer"]:
         if model.emb_type == "qid_cl":
             y, loss = model.get_cl_loss(cc.long(), cr.long(), cq.long())  # with cl loss
@@ -115,7 +197,10 @@ def model_forward(model, data, rel=None):
             y, loss = model.get_loss(cc.long(), cr.long(), cq.long())
         ys.append(y[:,1:])
         preloss.append(loss)
-    elif model_name in ["bakt_time"]:
+    elif model_name in ["datakt", "mtkt"]:
+        y, y2, y3 = model(dcur, dgaps, train=True)
+        ys = [y[:,1:], y2, y3]
+    elif model_name in ["fa_kt"]:
         y, y2, y3 = model(dcur, dgaps, train=True)
         ys = [y[:,1:], y2, y3]
     elif model_name in ["lpkt"]:
@@ -125,6 +210,12 @@ def model_forward(model, data, rel=None):
         y = model(c.long(), r.long())
         y = (y * one_hot(cshft.long(), model.num_c)).sum(-1)
         ys.append(y) # first: yshft
+    elif model_name in ["dkt_enhance_pro", "sakt_enhance_pro"]:
+        y = model(q.long(), r.long(), c.long(), qshft.long(), cshft.long())
+        ys.append(y)
+    elif model_name == "cgmkt":
+        y, _ = model(q.long(), r.long(), c.long(), qshft.long(), cshft.long())
+        ys.append(y)
     elif model_name == "dkt+":
         y = model(c.long(), r.long())
         y_next = (y * one_hot(cshft.long(), model.num_c)).sum(-1)
@@ -137,14 +228,25 @@ def model_forward(model, data, rel=None):
     elif model_name in ["dkvmn","deep_irt", "skvmn"]:
         y = model(cc.long(), cr.long())
         ys.append(y[:,1:])
+    elif model_name in ["dkvmn_enhance_pro"]:
+        y = model(cq.long(), cr.long())
+        ys.append(y[:,1:])
     elif model_name in ["kqn", "sakt"]:
         y = model(c.long(), r.long(), cshft.long())
         ys.append(y)
     elif model_name in ["saint"]:
         y = model(cq.long(), cc.long(), r.long())
         ys.append(y[:, 1:])
-    elif model_name in ["akt","extrakt","folibikt", "akt_vector", "akt_norasch", "akt_mono", "akt_attn", "aktattn_pos", "aktmono_pos", "akt_raschx", "akt_raschy", "aktvec_raschx"]:               
+    elif model_name in ["akt","extrakt","folibikt", "robustkt", "akt_vector", "akt_norasch", "akt_mono", "akt_attn", "aktattn_pos", "aktmono_pos", "akt_raschx", "akt_raschy", "aktvec_raschx", "lefokt_akt", "fluckt"]:
         y, reg_loss = model(cc.long(), cr.long(), cq.long())
+        ys.append(y[:,1:])
+        preloss.append(reg_loss)
+    elif model_name in ["akt_enhance_pro_qid"]:
+        y, reg_loss = model(cc.long(), cr.long(), cq.long())
+        ys.append(y[:,1:])
+        preloss.append(reg_loss)
+    elif model_name in ["mockt"]:
+        y, reg_loss = model(s.long(), cc.long(), cr.long(), cq.long())
         ys.append(y[:,1:])
         preloss.append(reg_loss)
     elif model_name in ["atkt", "atktfix"]:
@@ -174,14 +276,18 @@ def model_forward(model, data, rel=None):
         # y = model(cc[0:1,0:5].long(), cq[0:1,0:5].long(), ct[0:1,0:5].long(), cr[0:1,0:5].long(), csm[0:1,0:5].long())
         y = model(cc.long(), cq.long(), ct.long(), cr.long())#, csm.long())
         ys.append(y[:, 1:])
-    elif model_name in que_type_models and model_name not in ["lpkt", "rkt"]:
+    elif model_name in que_type_models and model_name not in ["lpkt", "rkt"] + direct_train_que_type_models:
         y,loss = model.train_one_step(data)
     elif model_name == "dimkt":
         y = model(q.long(),c.long(),sd.long(),qd.long(),r.long(),qshft.long(),cshft.long(),sdshft.long(),qdshft.long())
         ys.append(y) 
 
-    if model_name not in ["atkt", "atktfix"]+que_type_models or model_name in ["lpkt", "rkt"]:
+    if model_name not in ["atkt", "atktfix"]+que_type_models or model_name in ["lpkt", "rkt", "dkt_enhance_pro", "dkvmn_enhance_pro", "sakt_enhance_pro", "cgmkt"]:
         loss = cal_loss(model, ys, r, rshft, sm, preloss)
+    if model_name in ["akt_enhance_pro_qid", "simplekt_enhance_pro_qid"]:
+        loss = cal_loss(model, ys, r, rshft, sm, preloss)
+    if model_name in ["ukt"] and model.use_CL != 0:
+        return loss,temp
     return loss
     
 
@@ -208,12 +314,14 @@ def train_model(model, train_loader, valid_loader, num_epochs, opt, ckpt_path, t
         loss_mean = []
         for data in train_loader:
             train_step+=1
-            if model.model_name in que_type_models and model.model_name not in ["lpkt", "rkt"]:
+            if model.model_name in que_type_models and model.model_name not in ["lpkt", "rkt"] + direct_train_que_type_models:
                 model.model.train()
             else:
                 model.train()
             if model.model_name=='rkt':
                 loss = model_forward(model, data, rel)
+            elif model.model_name in ["ukt"] and model.use_CL != 0:
+                loss,temp = model_forward(model, data)
             else:
                 loss = model_forward(model, data)
             opt.zero_grad()
@@ -222,6 +330,8 @@ def train_model(model, train_loader, valid_loader, num_epochs, opt, ckpt_path, t
                 clip_grad_norm_(model.parameters(), model.grad_clip)
             if model.model_name == "dtransformer":
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            if model.model_name == "cgmkt":
+                clip_grad_norm_(model.parameters(), 15.0)
             opt.step()#update model’s parameters
                 
             loss_mean.append(loss.detach().cpu().numpy())

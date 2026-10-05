@@ -21,7 +21,7 @@ from .hawkes import HawkesKT
 from .iekt import IEKT
 from .atdkt import ATDKT
 from .simplekt import simpleKT
-from .bakt_time import BAKTTime
+from .datakt import BAKTTime
 from .qdkt import QDKT
 from .qikt import QIKT
 from .dimkt import DIMKT
@@ -32,10 +32,30 @@ from .dtransformer import DTransformer
 from .stablekt import stableKT
 from .extrakt import extraKT
 from .rekt import ReKT
+from .cskt import CSKT
+from .lefokt_akt import LEFOKT_AKT
+from .ukt import UKT
+from .hcgkt import HCGKT
+from .robustkt import Robustkt
+from .mockt import MocKT
+from .fa_kt import FA_KT
+from .mtkt import MTKT
+from .denoisekt import DenoiseKT
+from .fluckt import FlucKT
+from .cgmkt import CGMKT
+from .dkt_enhance_pro import DKT_Enhance_Pro
+from .dkvmn_enhance_pro import DKVMN_Enhance_PRO
+from .sakt_enhance_pro import SAKT_Enhance_PRO
+from .akt_enhance_pro_qid import AKT_Enhance_Pro_qid
+from .simplekt_enhance_pro_qid import simpleKT_enhance_pro_qid
 
 device = "cpu" if not torch.cuda.is_available() else "cuda"
 
-def init_model(model_name, model_config, data_config, emb_type):
+def init_model(model_name, model_config, data_config, emb_type, dataset_name=None):
+    if dataset_name is None:
+        dataset_name = data_config.get("dataset_name")
+    if dataset_name is None and data_config.get("dpath"):
+        dataset_name = os.path.basename(os.path.normpath(data_config["dpath"]))
     if model_name == "dkt":
         model = DKT(data_config["num_c"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
     elif model_name == "dkt+":
@@ -52,6 +72,8 @@ def init_model(model_name, model_config, data_config, emb_type):
         model = DKTForget(data_config["num_c"], data_config["num_rgap"], data_config["num_sgap"], data_config["num_pcount"], **model_config).to(device)
     elif model_name == "akt":
         model = AKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
+    elif model_name == "lefokt_akt":
+        model = LEFOKT_AKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
     elif model_name == "extrakt":
         model = extraKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
     elif model_name == "folibikt":
@@ -106,7 +128,7 @@ def init_model(model_name, model_config, data_config, emb_type):
                 max_concepts=data_config['max_concepts'], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"],device=device).to(device)
     elif model_name == "atdkt":
         model = ATDKT(data_config["num_q"], data_config["num_c"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
-    elif model_name == "bakt_time":
+    elif model_name == "datakt":
         model = BAKTTime(data_config["num_c"], data_config["num_q"], data_config["num_rgap"], data_config["num_sgap"], data_config["num_pcount"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
     elif model_name == "simplekt":
         model = simpleKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
@@ -119,17 +141,48 @@ def init_model(model_name, model_config, data_config, emb_type):
     elif model_name == "sparsekt":
         model = sparseKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
     elif model_name == "rkt":
-        model = RKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)    
+        model = RKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device) 
+    elif model_name == "cskt":
+        model = CSKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device) 
+    elif model_name == "ukt":
+        model = UKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
+    elif model_name == "hcgkt":
+        model = HCGKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
+    elif model_name == "robustkt":
+        model = Robustkt(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
     elif model_name == "dtransformer":
         model = DTransformer(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type,
-                     emb_path=data_config["emb_path"]).to(device)      
+                     emb_path=data_config["emb_path"]).to(device)
+    elif model_name == "mockt":
+        model = MocKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
+    elif model_name == "fa_kt":
+        model = FA_KT(data_config["num_c"], data_config["num_q"], data_config["num_rgap"], data_config["num_sgap"], data_config["num_pcount"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
+    elif model_name == "mtkt":
+        model = MTKT(data_config["num_c"], data_config["num_q"], data_config["num_rgap"], data_config["num_sgap"], data_config["num_pcount"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
+    elif model_name == "denoisekt":
+        model = DenoiseKT(num_c=data_config['num_c'], num_q=data_config['num_q'],
+                max_concepts=data_config['max_concepts'], **model_config, emb_type=emb_type, dpath=data_config["dpath"], emb_path=data_config["emb_path"], device=device).to(device)
+    elif model_name == "fluckt":
+        model = FlucKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
+    elif model_name == "dkt_enhance_pro":
+        model = DKT_Enhance_Pro(data_config["num_q"], data_config["num_c"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"], dataset_name=dataset_name).to(device)
+    elif model_name == "dkvmn_enhance_pro":
+        model = DKVMN_Enhance_PRO(data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"], dataset_name=dataset_name).to(device)
+    elif model_name == "sakt_enhance_pro":
+        model = SAKT_Enhance_PRO(data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"], dataset_name=dataset_name).to(device)
+    elif model_name == "akt_enhance_pro_qid":
+        model = AKT_Enhance_Pro_qid(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"], dataset_name=dataset_name).to(device)
+    elif model_name == "simplekt_enhance_pro_qid":
+        model = simpleKT_enhance_pro_qid(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"], dataset_name=dataset_name).to(device)
+    elif model_name == "cgmkt":
+        model = CGMKT(data_config["num_q"], data_config["num_c"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
     else:
         print("The wrong model name was used...")
         return None
     return model
 
-def load_model(model_name, model_config, data_config, emb_type, ckpt_path):
-    model = init_model(model_name, model_config, data_config, emb_type)
+def load_model(model_name, model_config, data_config, emb_type, ckpt_path, dataset_name=None):
+    model = init_model(model_name, model_config, data_config, emb_type, dataset_name)
     net = torch.load(os.path.join(ckpt_path, emb_type+"_model.ckpt"))
     model.load_state_dict(net)
     return model

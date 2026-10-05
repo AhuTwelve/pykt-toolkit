@@ -1,62 +1,36 @@
+import os
 import torch
-from torch import nn
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+from .que_base_model import QueBaseModel
+from pykt.utils import debug_print
+import math
+import pandas as pd
+
 from torch.nn.init import xavier_uniform_
 from torch.nn.init import constant_
-import math
-import torch.nn.functional as F
 from enum import IntEnum
-import numpy as np
 from .utils import transformer_FFN, ut_mask, pos_encode, get_clones
 from torch.nn import Module, Embedding, LSTM, Linear, Dropout, LayerNorm, TransformerEncoder, TransformerEncoderLayer, \
         MultiLabelMarginLoss, MultiLabelSoftMarginLoss, CrossEntropyLoss, BCELoss, MultiheadAttention
 from torch.nn.functional import one_hot, cross_entropy, multilabel_margin_loss, binary_cross_entropy
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+import os
 
 class Dim(IntEnum):
     batch = 0
     seq = 1
     feature = 2
 
-class timeGap2(nn.Module):
-    def __init__(self, num_rgap, num_sgap, num_pcount, emb_size) -> None:
-        super().__init__()
-        self.num_rgap, self.num_sgap, self.num_pcount = num_rgap, num_sgap, num_pcount
-        if num_rgap != 0:
-            self.rgap_eye = torch.eye(num_rgap)
-        if num_sgap != 0:
-            self.sgap_eye = torch.eye(num_sgap)
-        if num_pcount != 0:
-            self.pcount_eye = torch.eye(num_pcount)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        input_size = num_rgap + num_sgap + num_pcount
-        
-        print(f"self.num_rgap: {self.num_rgap}, self.num_sgap: {self.num_sgap}, self.num_pcount: {self.num_pcount}, input_size: {input_size}")
-
-        self.time_emb = nn.Linear(input_size, emb_size, bias=False)
-
-    def forward(self, rgap, sgap, pcount):
-        infs = []
-        if self.num_rgap != 0:
-            rgap = self.rgap_eye[rgap].to(device)
-            infs.append(rgap)
-        if self.num_sgap != 0:
-            sgap = self.sgap_eye[sgap].to(device)
-            infs.append(sgap)
-        if self.num_pcount != 0:
-            pcount = self.pcount_eye[pcount].to(device)
-            infs.append(pcount)
-
-        tg = torch.cat(infs, -1)
-        tg_emb = self.time_emb(tg)
-
-        return tg_emb
-
-class BAKTTime(nn.Module):
-    def __init__(self, n_question, n_pid, num_rgap, num_sgap, num_pcount, 
-            d_model, n_blocks, dropout, d_ff=256, 
-            loss1=0.5, loss2=0.5, loss3=0.5, start=50, num_layers=2, nheads=4, seq_len=200, 
-            kq_same=1, final_fc_dim=512, final_fc_dim2=256, num_attn_heads=8, separate_qa=False, l2=1e-5, emb_type="qid", emb_path="", pretrain_dim=768):
+class DenoiseKTNet(nn.Module):
+    def __init__(self, num_c, num_q, 
+            d_model, n_blocks, dropout, dropout1, bf, d_ff=256, seq_len=200, 
+            kq_same=1, final_fc_dim=512, final_fc_dim2=256, num_attn_heads=8, 
+            separate_qa=False, l2=1e-5, emb_type="qid", dpath = "", emb_path="", 
+            pretrain_dim=768,device='cpu',other_config={}):
         super().__init__()
         """
         Input:
@@ -66,31 +40,57 @@ class BAKTTime(nn.Module):
             d_ff : dimension for fully conntected net inside the basic block
             kq_same: if key query same, kq_same=1, else = 0
         """
-        self.model_name = "bakt_time"
+        self.model_name = "denoisekt"
         print(f"model_name: {self.model_name}, emb_type: {emb_type}")
-        self.n_question = n_question
+        self.num_c = num_c
         self.dropout = dropout
+        self.dropout1 = dropout1
         self.kq_same = kq_same
-        self.n_pid = n_pid
+        self.num_q = num_q
         self.l2 = l2
         self.model_type = self.model_name
         self.separate_qa = separate_qa
         self.emb_type = emb_type
+        self.emb_size = d_model
+        self.device = device
+        self.bf = bf
+        self.num_attn_heads = num_attn_heads
         embed_l = d_model
-        if self.n_pid > 0:
-            self.difficult_param = nn.Embedding(self.n_pid+1, embed_l) # 题目难度
-            self.q_embed_diff = nn.Embedding(self.n_question+1, embed_l) # question emb, 总结了包含当前question（concept）的problems（questions）的变化
-            self.qa_embed_diff = nn.Embedding(2 * self.n_question + 1, embed_l) # interaction emb, 同上
+        if self.num_q > 0:
+            if emb_type.find("scalar") != -1:
+                # print(f"question_difficulty is scalar")
+                self.difficult_param = nn.Embedding(self.num_q+1, 1)
+            else:
+                self.difficult_param = nn.Embedding(self.num_q+1, embed_l) 
+            
+
+        # The sparse question-concept adjacency tensor `questions_concepts.pt`
+        # is required under <dpath> for DenoiseKT. The generation script can
+        # be downloaded from:
+        # https://drive.google.com/file/d/15R1RNvV4NmwsEoYUyJwTwGXCsK_ODbLd/view?usp=sharing
+        qs_cs_path = dpath + '/questions_concepts.pt'
+        if not os.path.exists(qs_cs_path):
+            raise FileNotFoundError(
+                f"DenoiseKT requires `{qs_cs_path}` (sparse question-concept "
+                f"adjacency tensor). Generate it with the script at "
+                f"https://drive.google.com/file/d/15R1RNvV4NmwsEoYUyJwTwGXCsK_ODbLd/view?usp=sharing"
+            )
+        self.matrix = torch.load(qs_cs_path).to(device)
         
+
         if emb_type.startswith("qid"):
-            # n_question+1 ,d_model
-            self.q_embed = nn.Embedding(self.n_question, embed_l)
-            if self.separate_qa: 
-                    self.qa_embed = nn.Embedding(2*self.n_question+1, embed_l)
-            else: # false default
-                self.qa_embed = nn.Embedding(2, embed_l)
-        # Architecture Object. It contains stack of attention block
-        self.model = Architecture(n_question=n_question, n_blocks=n_blocks, n_heads=num_attn_heads, dropout=dropout,
+            self.ans_embed = Embedding(2, embed_l)
+
+        self.skill_embed = nn.Parameter(torch.rand(self.num_c, self.emb_size))
+        
+        nn.init.xavier_uniform_(self.skill_embed)
+        self.pro_embed = nn.Parameter(torch.ones((self.num_q, self.emb_size))) 
+        nn.init.xavier_uniform_(self.pro_embed)
+
+        self.gcn = GCN(self.emb_size, self.emb_size, dropout1).to(device)
+
+
+        self.model = Architecture(n_question=num_q, n_blocks=n_blocks, n_heads=num_attn_heads, dropout=dropout,
                                     d_model=d_model, d_feature=d_model / num_attn_heads, d_ff=d_ff,  kq_same=self.kq_same, model_type=self.model_type, seq_len=seq_len)
 
         self.out = nn.Sequential(
@@ -100,129 +100,167 @@ class BAKTTime(nn.Module):
             ), nn.Dropout(self.dropout),
             nn.Linear(final_fc_dim2, 1)
         )
-        if emb_type.endswith("hasw") != -1:
-            self.c_weight = nn.Linear(d_model, d_model)
-        
-        if emb_type in ["qidonlyrgap", "qidonlysgap", "qidonlypcount", "qidrsgap", "qidrpgap", "qidspgap"]:
-            self.c_weight = nn.Linear(d_model, d_model)
-            self.t_weight = nn.Linear(d_model, d_model)
-        
-        if emb_type.endswith("onlyrgap"):
-            self.time_emb = timeGap2(num_rgap, 0, 0, d_model)
-        if emb_type.endswith("onlysgap"):
-            self.time_emb = timeGap2(0, num_sgap, 0, d_model)
-        if emb_type.endswith("onlypcount"):
-            self.time_emb = timeGap2(0, 0, num_pcount, d_model)
-            
-        if emb_type.endswith("rsgap"):
-            self.time_emb = timeGap2(num_rgap, num_sgap, 0, d_model)
-        if emb_type.endswith("rpgap"):
-            self.time_emb = timeGap2(num_rgap, 0, num_pcount, d_model)
-        if emb_type.endswith("spgap"):
-            self.time_emb = timeGap2(0, num_sgap, num_pcount, d_model)
-            
-        if emb_type in ["qidonlyrgap", "qidonlysgap", "qidonlypcount", "qidrsgap", "qidrpgap", "qidspgap"]:
-            self.model2 = Architecture(n_question=n_question, n_blocks=n_blocks, n_heads=num_attn_heads,
-                                    dropout=dropout, d_model=d_model, d_feature=d_model / num_attn_heads, d_ff=d_ff,
-                                    kq_same=self.kq_same, model_type=self.model_type, seq_len=seq_len)
-
-        if self.emb_type == "qid":
-            self.c_weight = nn.Linear(d_model, d_model)
-            self.t_weight = nn.Linear(d_model, d_model)
-            self.time_emb = timeGap(num_rgap, num_sgap, num_pcount, d_model)
-            self.model2 = Architecture(n_question=n_question, n_blocks=n_blocks, n_heads=num_attn_heads,
-                                       dropout=dropout, d_model=d_model, d_feature=d_model / num_attn_heads, d_ff=d_ff,
-                                       kq_same=self.kq_same, model_type=self.model_type, seq_len=seq_len)
 
         self.reset()
 
+    def get_avg_skill_emb(self,c,emb):
+        # add zero for padding
+        concept_emb_cat = torch.cat(
+            [torch.zeros(1, self.emb_size).to(self.device), 
+            emb], dim=0)
+        # shift c
+
+        related_concepts = (c+1).long()
+        #[batch_size, seq_len, emb_dim]
+        concept_emb_sum = concept_emb_cat[related_concepts, :].sum(
+            axis=-2)
+
+        #[batch_size, seq_len,1]
+        concept_num = torch.where(related_concepts != 0, 1, 0).sum(
+            axis=-1).unsqueeze(-1)
+        concept_num = torch.where(concept_num == 0, 1, concept_num)
+        concept_avg = (concept_emb_sum / concept_num)
+        return concept_avg
+
+    def boost_focus(self,concept):
+        
+        batch_size, rows, cols = concept.size()
+
+        
+        cl = concept.unsqueeze(2)  
+        cr = concept.unsqueeze(1)  
+        resultl = cl.repeat(1, 1, rows, 1)  
+        resultr = cr.repeat(1, rows, 1, 1)    
+        result = torch.all(resultl == resultr, dim=-1)
+
+        
+        diag_mask = torch.eye(rows, rows, dtype=torch.bool).unsqueeze(0)
+        diag_mask = diag_mask.repeat(batch_size, 1, 1)
+        
+        result[diag_mask] = False
+
+        
+        row_indices = torch.arange(rows).unsqueeze(1)  # shape: (rows, 1)
+        col_indices = torch.arange(rows).unsqueeze(0)  # shape: (1, cols)
+
+        
+        index = (row_indices - col_indices).repeat(batch_size, 1, 1).to(concept.device)
+        bf = torch.abs(result * index)
+        # djw[djw == 0] = 1024
+        return bf.to(concept)
+
     def reset(self):
         for p in self.parameters():
-            if p.size(0) == self.n_pid+1 and self.n_pid > 0:
+            if p.size(0) == self.num_q+1 and self.num_q > 0:
                 torch.nn.init.constant_(p, 0.)
 
     def base_emb(self, q_data, target):
         q_embed_data = self.q_embed(q_data)  # BS, seqlen,  d_model# c_ct
         if self.separate_qa:
-            qa_data = q_data + self.n_question * target
+            qa_data = q_data + self.num_c * target
             qa_embed_data = self.qa_embed(qa_data)
         else:
             # BS, seqlen, d_model # c_ct+ g_rt =e_(ct,rt)
             qa_embed_data = self.qa_embed(target)+q_embed_data
         return q_embed_data, qa_embed_data
 
-    def get_attn_pad_mask(self, sm):
-        batch_size, l = sm.size()
-        pad_attn_mask = sm.data.eq(0).unsqueeze(1)
-        pad_attn_mask = pad_attn_mask.expand(batch_size, l, l)
-        return pad_attn_mask.repeat(self.nhead, 1, 1)
-
-    def forward(self, dcur, dgaps, qtest=False, train=False):
-        q, c, r = dcur["qseqs"].long(), dcur["cseqs"].long(), dcur["rseqs"].long()
-        qshft, cshft, rshft = dcur["shft_qseqs"].long(), dcur["shft_cseqs"].long(), dcur["shft_rseqs"].long()
-        pid_data = torch.cat((q[:,0:1], qshft), dim=1)
-        q_data = torch.cat((c[:,0:1], cshft), dim=1)
-        target = torch.cat((r[:,0:1], rshft), dim=1)
+    def forward(self, cq, cc, cr, perb=None):
 
         emb_type = self.emb_type
 
-        # Batch First
-        if emb_type.startswith("qid"):
-            q_embed_data, qa_embed_data = self.base_emb(q_data, target)
-        if self.n_pid > 0: # have problem id
-            q_embed_diff_data = self.q_embed_diff(q_data)  # d_ct 总结了包含当前question（concept）的problems（questions）的变化
-            pid_embed_data = self.difficult_param(pid_data)  # uq 当前problem的难度
+        if emb_type == "qid":
+            contrast_loss = 0
+            
+            q_embed = self.gcn(self.pro_embed, self.matrix)
+
+            q_embed_data = F.embedding(cq, q_embed)
+            ans_embed_data = self.ans_embed(cr)
+            qa_embed_data = q_embed_data + ans_embed_data
+             
+            q_embed_diff_data = self.get_avg_skill_emb(cc,self.skill_embed)
+            # q_embed_diff_data = self.get_avg_skill_emb_ablation(cc,self.skill_embed)
+
+            pid_embed_data = self.difficult_param(cq)  # uq 
             q_embed_data = q_embed_data + pid_embed_data * \
                 q_embed_diff_data  # uq *d_ct + c_ct # question encoder
 
-        if emb_type == "qid" or emb_type in ["qidonlyrgap", "qidonlysgap", "qidonlypcount", "qidrsgap", "qidrpgap", "qidspgap"]:
-            rg, sg, p = dgaps["rgaps"].long(), dgaps["sgaps"].long(), dgaps["pcounts"].long()
-            rgshft, sgshft, pshft = dgaps["shft_rgaps"].long(), dgaps["shft_sgaps"].long(), dgaps["shft_pcounts"].long()
+            boost_focus = (self.bf ** self.boost_focus(cc))
+            boost_focus[boost_focus == 1] = 0
+            boost_focus = boost_focus.unsqueeze(1) # shape: bs,1,seqlen,seqlen
+            boost_focus = boost_focus.repeat(1, self.num_attn_heads, 1, 1) # shape: bs,head,seqlen,seqlen
 
-            r_gaps = torch.cat((rg[:, 0:1], rgshft), dim=1)
-            s_gaps = torch.cat((sg[:, 0:1], sgshft), dim=1)
-            pcounts = torch.cat((p[:, 0:1], pshft), dim=1)
+        if emb_type in ["qid", "qidaktrasch", "qid_scalar", "qid_norasch"]:
 
-            temb = self.time_emb(r_gaps, s_gaps, pcounts)
-            # time attention
-            # t_out = self.model2(temb, self.qa_embed(target)+temb)
-            t_out = self.model2(temb, qa_embed_data) # 计算时间信息和基本信息的attention？
+            d_output = self.model(q_embed_data, qa_embed_data, boost_focus)
 
-        # BS.seqlen,d_model
-        # Pass to the decoder
-        # output shape BS,seqlen,d_model or d_model//2
-        y2, y3 = 0, 0
+            concat_q = torch.cat([d_output, q_embed_data], dim=-1)
+            output = self.out(concat_q).squeeze(-1)
+            m = nn.Sigmoid()
+            preds = m(output).squeeze(-1)
+        return preds[:,1:], contrast_loss
         
-        # elif emb_type in ["qidonlyrgap", "qidonlysgap", "qidonlypcount", "qidrsgap", "qidrpgap", "qidspgap"]
-        if emb_type == "qid" or emb_type in ["qidonlyrgap", "qidonlysgap", "qidonlypcount", "qidrsgap", "qidrpgap", "qidspgap"]:
-            d_output = self.model(q_embed_data, qa_embed_data)
 
-            w = torch.sigmoid(self.c_weight(d_output) + self.t_weight(t_out)) # w = sigmoid(基本信息编码 + 时间信息编码)，每一维设置为0-1之间的数值
-            d_output = w * d_output + (1 - w) * t_out # 每一维加权平均后的综合信息
-            q_embed_data = q_embed_data + temb # 原始的题目信息和时间信息
 
-            concat_q = torch.cat([d_output, q_embed_data], dim=-1)
-            output = self.out(concat_q).squeeze(-1)
-            m = nn.Sigmoid()
-            preds = m(output)
-        elif emb_type.endswith("hasw"):
-            d_output = self.model(q_embed_data, qa_embed_data)
-            
-            w = torch.sigmoid(self.c_weight(d_output))
-            d_output = w * d_output
-            
-            concat_q = torch.cat([d_output, q_embed_data], dim=-1)
-            output = self.out(concat_q).squeeze(-1)
-            m = nn.Sigmoid()
-            preds = m(output)
+class DenoiseKT(QueBaseModel):
+    def __init__(self, num_c, num_q, 
+            d_model, n_blocks, dropout, dropout1, bf, d_ff=256, seq_len=200, 
+            kq_same=1, final_fc_dim=512, final_fc_dim2=256, num_attn_heads=8, separate_qa=False, l2=1e-5, emb_type="qid", dpath = "", emb_path="", pretrain_dim=768,device='cpu',seed=0,other_config={},**kwargs):
+        model_name = "denoisekt"
+       
+        debug_print(f"emb_type is {emb_type}",fuc_name="DenoiseKT")
 
-        if train:
-            return preds, y2, y3
+        super().__init__(model_name=model_name,emb_type=emb_type,emb_path=emb_path,pretrain_dim=pretrain_dim,device=device,seed=seed)
+        # def __init__(self, emb_size, dropout=0.1, emb_type='qid', dpath = "", emb_path="", pretrain_dim=768,device='cpu',other_config={}):
+        self.model = DenoiseKTNet(num_c = num_c, num_q = num_q, 
+            d_model = d_model, n_blocks = n_blocks, dropout = dropout, dropout1 = dropout1,bf=bf, d_ff=d_ff, seq_len=seq_len, 
+            kq_same=kq_same, final_fc_dim=final_fc_dim, final_fc_dim2=final_fc_dim2, num_attn_heads=num_attn_heads, separate_qa=separate_qa, l2=l2, emb_type=emb_type, dpath = dpath, emb_path=emb_path, pretrain_dim=pretrain_dim,device=device,other_config=other_config)
+       
+        self.model = self.model.to(device)
+        self.emb_type = self.model.emb_type
+        self.loss_func = self._get_loss_func("binary_crossentropy")
+       
+    def train_one_step(self,data,perb=None,process=True,return_all=False):
+        outputs, data_new, contrast_loss = self.predict_one_step(data,perb,return_details=True,process=process)
+        loss = self.get_loss(outputs,data_new['rshft'],data_new['sm']) + contrast_loss
+        return outputs,loss
+
+    def predict_one_step(self,data,perb=None,return_details=False,process=True,return_raw=False):
+        data_new = self.batch_to_device(data,process=process)
+        outputs, contrast_loss = self.model(data_new['cq'].long(),data_new['cc'].long(),data_new['cr'].long(),perb)
+        if return_details:
+            return outputs,data_new,contrast_loss
         else:
-            if qtest:
-                return preds, concat_q
-            else:
-                return preds
+            return outputs
+
+
+class GCN(nn.Module):  
+    def __init__(self, in_dim, out_dim, p):
+        super(GCN, self).__init__()
+
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+
+        self.w = nn.Parameter(torch.rand((in_dim, out_dim)).to(device))
+        nn.init.xavier_uniform_(self.w)
+
+        self.b = nn.Parameter(torch.rand((out_dim)).to(device))
+        nn.init.zeros_(self.b)
+
+        self.dropout = nn.Dropout(p=p).to(device)
+
+    def forward(self, x, adj):
+        x = self.dropout(x.to(device))
+        x = torch.matmul(x, self.w.to(device))
+
+        # print(adj.shape)
+        # print(x.shape)
+        # os._exit(1)
+
+        x = torch.sparse.mm(adj.float().to(device), x)
+        x = x + self.b.to(device)
+        return x.to(device)
+
+
 
 class Architecture(nn.Module):
     def __init__(self, n_question,  n_blocks, d_model, d_feature,
@@ -237,7 +275,7 @@ class Architecture(nn.Module):
         self.d_model = d_model
         self.model_type = model_type
 
-        if model_type in {'bakt_time'}:
+        if model_type in {'denoisekt'}:
             self.blocks_2 = nn.ModuleList([
                 TransformerLayer(d_model=d_model, d_feature=d_model // n_heads,
                                  d_ff=d_ff, dropout=dropout, n_heads=n_heads, kq_same=kq_same)
@@ -245,7 +283,7 @@ class Architecture(nn.Module):
             ])
         self.position_emb = CosinePositionalEmbedding(d_model=self.d_model, max_len=seq_len)
 
-    def forward(self, q_embed_data, qa_embed_data):
+    def forward(self, q_embed_data, qa_embed_data ,boost_focus):
         # target shape  bs, seqlen
         seqlen, batch_size = q_embed_data.size(1), q_embed_data.size(0)
 
@@ -264,9 +302,7 @@ class Architecture(nn.Module):
         # encoder
         
         for block in self.blocks_2:
-            x = block(mask=0, query=x, key=x, values=y, apply_pos=True) # True: +FFN+残差+laynorm 非第一层与0~t-1的的q的attention, 对应图中Knowledge Retriever
-            # mask=0，不能看到当前的response, 在Knowledge Retrever的value全为0，因此，实现了第一题只有question信息，无qa信息的目的
-            # print(x[0,0,:])
+            x = block(mask=0, query=x, key=x, values=y, boost_focus=boost_focus, apply_pos=True)
         return x
 
 class TransformerLayer(nn.Module):
@@ -293,7 +329,7 @@ class TransformerLayer(nn.Module):
         self.layer_norm2 = nn.LayerNorm(d_model)
         self.dropout2 = nn.Dropout(dropout)
 
-    def forward(self, mask, query, key, values, apply_pos=True):
+    def forward(self, mask, query, key, values, boost_focus, apply_pos=True ):
         """
         Input:
             block : object of type BasicBlock(nn.Module). It contains masked_attn_head objects which is of type MultiHeadAttention(nn.Module).
@@ -314,18 +350,18 @@ class TransformerLayer(nn.Module):
         if mask == 0:  # If 0, zero-padding is needed.
             # Calls block.masked_attn_head.forward() method
             query2 = self.masked_attn_head(
-                query, key, values, mask=src_mask, zero_pad=True) # 只能看到之前的信息，当前的信息也看不到，此时会把第一行score全置0，表示第一道题看不到历史的interaction信息，第一题attn之后，对应value全0
+                query, key, values, mask=src_mask, zero_pad=True, boost_focus=boost_focus)
         else:
             # Calls block.masked_attn_head.forward() method
             query2 = self.masked_attn_head(
-                query, key, values, mask=src_mask, zero_pad=False)
+                query, key, values, mask=src_mask, zero_pad=False, boost_focus=boost_focus)
 
-        query = query + self.dropout1((query2)) # 残差1
+        query = query + self.dropout1((query2))
         query = self.layer_norm1(query) # layer norm
         if apply_pos:
             query2 = self.linear2(self.dropout( # FFN
                 self.activation(self.linear1(query))))
-            query = query + self.dropout2((query2)) # 残差
+            query = query + self.dropout2((query2))
             query = self.layer_norm2(query) # lay norm
         return query
 
@@ -364,7 +400,7 @@ class MultiHeadAttention(nn.Module):
                 constant_(self.q_linear.bias, 0.)
             constant_(self.out_proj.bias, 0.)
 
-    def forward(self, q, k, v, mask, zero_pad):
+    def forward(self, q, k, v, mask, zero_pad ,boost_focus):
 
         bs = q.size(0)
 
@@ -384,7 +420,7 @@ class MultiHeadAttention(nn.Module):
         v = v.transpose(1, 2)
         # calculate attention using function we will define next
         scores = attention(q, k, v, self.d_k,
-                           mask, self.dropout, zero_pad)
+                           mask, self.dropout, zero_pad, boost_focus)
 
         # concatenate heads and put through final linear layer
         concat = scores.transpose(1, 2).contiguous()\
@@ -395,22 +431,25 @@ class MultiHeadAttention(nn.Module):
         return output
 
 
-def attention(q, k, v, d_k, mask, dropout, zero_pad):
+def attention(q, k, v, d_k, mask, dropout, zero_pad, boost_focus):#
     """
     This is called by Multi-head atention object to find the values.
     """
-    # d_k: 每一个头的dim
+    
     scores = torch.matmul(q, k.transpose(-2, -1)) / \
         math.sqrt(d_k)  # BS, 8, seqlen, seqlen
+    
+    scores = scores * (1 + boost_focus)
+    
+    
     bs, head, seqlen = scores.size(0), scores.size(1), scores.size(2)
 
     scores.masked_fill_(mask == 0, -1e32)
     scores = F.softmax(scores, dim=-1)  # BS,8,seqlen,seqlen
-    # print(f"before zero pad scores: {scores.shape}")
-    # print(zero_pad)
+
     if zero_pad:
         pad_zero = torch.zeros(bs, head, 1, seqlen).to(device)
-        scores = torch.cat([pad_zero, scores[:, :, 1:, :]], dim=2) # 第一行score置0
+        scores = torch.cat([pad_zero, scores[:, :, 1:, :]], dim=2) 
     # print(f"after zero pad scores: {scores}")
     scores = dropout(scores)
     output = torch.matmul(scores, v)
@@ -446,25 +485,3 @@ class CosinePositionalEmbedding(nn.Module):
 
     def forward(self, x):
         return self.weight[:, :x.size(Dim.seq), :]  # ( 1,seq,  Feature)
-
-class timeGap(nn.Module):
-    def __init__(self, num_rgap, num_sgap, num_pcount, emb_size) -> None:
-        super().__init__()
-        self.rgap_eye = torch.eye(num_rgap)
-        self.sgap_eye = torch.eye(num_sgap)
-        self.pcount_eye = torch.eye(num_pcount)
-
-        input_size = num_rgap + num_sgap + num_pcount
-
-        self.time_emb = nn.Linear(input_size, emb_size, bias=False)
-
-    def forward(self, rgap, sgap, pcount):
-        rgap = self.rgap_eye[rgap].to(device)
-        sgap = self.sgap_eye[sgap].to(device)
-        pcount = self.pcount_eye[pcount].to(device)
-
-        tg = torch.cat((rgap, sgap, pcount), -1)
-        tg_emb = self.time_emb(tg)
-
-        return tg_emb
-

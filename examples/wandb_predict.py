@@ -40,13 +40,18 @@ def main(params):
         curconfig = copy.deepcopy(json.load(fin))
         data_config = curconfig[dataset_name]
         data_config["dataset_name"] = dataset_name
-        if model_name in ["dkt_forget", "bakt_time"]:
+        if model_name in ["dkt_forget", "bakt_time", "fa_kt", "mtkt"]:
             data_config["num_rgap"] = config["data_config"]["num_rgap"]
             data_config["num_sgap"] = config["data_config"]["num_sgap"]
             data_config["num_pcount"] = config["data_config"]["num_pcount"]
         elif model_name == "lpkt":
             data_config["num_at"] = config["data_config"]["num_at"]
             data_config["num_it"] = config["data_config"]["num_it"]    
+
+    # keep cgmkt predict batch size aligned with the original tuning logs
+    if model_name == "cgmkt":
+        batch_size = 64
+
     if model_name not in ["dimkt"]:        
         test_loader, test_window_loader, test_question_loader, test_question_window_loader = init_test_datasets(data_config, model_name, batch_size)
     else:
@@ -118,6 +123,20 @@ def main(params):
     # print(f"question_testauc: {question_testauc}, question_testacc: {question_testacc}, question_window_testauc: {question_window_testauc}, question_window_testacc: {question_window_testacc}")
     
     print(dres)
+
+    # ---- 关键指标提示（避免误用其他列） ----
+    has_question = "windowauclate_mean" in dres and "windowacclate_mean" in dres
+    print("\n========== Final reported metric ==========")
+    if has_question:
+        print("Dataset has question id -> report at the question level on the windowed test set:")
+        print(f"  windowauclate_mean = {dres['windowauclate_mean']:.6f}")
+        print(f"  windowacclate_mean = {dres['windowacclate_mean']:.6f}")
+    else:
+        print("Dataset has only concepts -> report on the windowed test set:")
+        print(f"  window_testauc = {dres['window_testauc']:.6f}")
+        print(f"  window_testacc = {dres['window_testacc']:.6f}")
+    print("===========================================\n")
+
     raw_config = json.load(open(os.path.join(save_dir,"config.json")))
     dres.update(raw_config['params'])
 
